@@ -1,0 +1,422 @@
+---
+title: "Econ 144 HW 1"
+author: "Leonard Zhu"
+date: "2024-10-11"
+output: pdf_document
+---
+# Textbook A
+
+## Problem 2.1
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Input the data into a matrix for analysis
+data1 <- matrix(c(
+  0.0, 5.0, 1.0, 1.0, 0.5, 1.6, 0.8, 1.0, 1.0, 0.0,  # X = 1.0
+  10.0, 0.0, 2.0, 3.0, 1.0, 2.0, 1.0, 0.2, 0.5, 1.0, # X = 2.0
+  15.0, 10.0, 4.0, 4.0, 2.0, 2.5, 2.0, 2.0, 1.5, 2.0, # X = 3.0
+  0.0, 15.0, 6.0, 5.0, 2.0, 2.0, 2.0, 6.0, 6.0, 6.0, # X = 4.0
+  20.0, 16.0, 6.0, 7.0, 5.0, 5.0, 4.0, 8.0, 8.0, 16.0 # X = 5.0
+), nrow = 10, byrow = TRUE)
+
+# Set up the labels
+colnames(data1) <- c("X1.0", "X2.0", "X3.0", "X4.0", "X5.0")
+rownames(data1) <- paste0("Y", seq(1, 10))
+
+# View the data matrix
+data1
+```
+
+
+### a. Conditional Sample Mean for X = 4
+```{r}
+# Extract data for X = 4 and calculate the mean
+x_4 <- data1[, "X4.0"]
+mean_x_4 <- mean(x_4)
+mean_x_4
+```
+Sample mean is 3.7
+
+### b. Conditional Sample Variance for X = 5
+```{r}
+# Extract data for X = 5 and calculate the variance
+x_5 <- data1[, "X5.0"]
+var_x_5 <- var(x_5)
+var_x_5
+```
+Sample Variance when X = 4 is 22.8
+
+### c. Histogram when X = 2
+```{r}
+# Extract data for X = 2 and plot a histogram
+x_2 <- data1[, "X2.0"]
+hist(x_2, main = "Histogram of Y for X = 2%", xlab = "Savings (Y in thousands $)", col = "blue")
+```
+
+### d. Unconditional Mean and Standard Deviation of Y
+```{r}
+# Flatten the matrix to get all Y values and calculate the mean and standard deviation
+all_y_values <- as.vector(data1)
+uncond_mean <- mean(all_y_values)
+uncond_mean
+uncond_sd <- sd(all_y_values)
+uncond_sd
+```
+Unconditional mean of 4.452, Standard Deviation of 4.824
+
+## Problem 2.7
+
+I wasn't able to locate the desired dataset from the U.S. Census Bureau, but tried to replicate my process had the dataset been similar to that of the FRED data. Sorry for any inconsistencies.
+```{r}
+# # Load necessary libraries
+# library(readr)  
+# library(ggplot2) 
+# 
+# # Step 1: Load the datasets
+# unemployed_data <- library(readr)
+# UNEMPLOY_1_ <- read_csv("~/Downloads/UNEMPLOY (1).csv")
+# poverty_data <- read_csv("path/to/poverty_data.csv")  # Placeholder for the poverty dataset
+# 
+# # Step 2: Calculate growth rates
+# unemployed_data$GrowthRate <- c(NA, diff(unemployed_data$UNEMPLOY) / head(unemployed_data$UNEMPLOY, -1))
+# 
+# # For the placeholder poverty data, assume it has similar structure
+# poverty_data$GrowthRate <- c(NA, diff(poverty_data$PovertyCount) / head(poverty_data$PovertyCount, -1))
+# 
+# # Step 3: Descriptive statistics
+# unemployed_stats <- summary(unemployed_data$GrowthRate, na.rm = TRUE)
+# poverty_stats <- summary(poverty_data$GrowthRate, na.rm = TRUE)
+# 
+# # Step 4: Correlation coefficient
+# correlation <- cor(unemployed_data$GrowthRate, poverty_data$GrowthRate, use = "complete.obs")
+# 
+# # Step 5: Print results
+# print("Descriptive Statistics for Unemployed Persons Growth Rate:")
+# print(unemployed_stats)
+# 
+# print("Descriptive Statistics for Number of People in Poverty Growth Rate (Placeholder):")
+# print(poverty_stats)
+# print("Correlation Coefficient between Growth Rates:")
+# print(correlation)
+```
+
+## Problem 2.8
+Same comment as above.
+```{r}
+# # Load necessary libraries
+# library(readr)  # For reading data
+# 
+# # Merge the datasets based on DATE
+# merged_data <- merge(unemployed_data, poverty_data, by = "DATE")
+# 
+# # Fit the regression model
+# model <- lm(PovertyCount ~ UNEMPLOY, data = merged_data)
+# 
+# # Summary of the model
+# summary_model <- summary(model)
+# 
+# # Extract t-ratios and p-values
+# t_ratios <- summary_model$coefficients[, "t value"]
+# p_values <- summary_model$coefficients[, "Pr(>|t|)"]
+# 
+# # Perform an F-test for overall significance
+# f_statistic <- summary_model$fstatistic[1]
+# f_p_value <- pf(f_statistic, summary_model$fstatistic[2], summary_model$fstatistic[3], lower.tail = FALSE)
+```
+
+## Problem 3.3
+
+### a. US real GDP
+```{r}
+# download from FRED to dataframe
+library(quantmod)
+library(ggplot2)
+library(dplyr)
+
+gdp_symbol <- "GDPC1"
+getSymbols(gdp_symbol, src = "FRED")
+gdpc1_data <- data.frame(Date = index(GDPC1), GDPC1 = coredata(GDPC1))
+
+# plot
+ggplot(gdpc1_data, aes(x = Date, y = GDPC1)) +
+  geom_line(color = "red") +
+  labs(title = "Real Gross Domestic Product (GDPC1)",
+       x = "Date", y = "Real GDP in Billions of Chained 2017 Dollars") 
+```
+
+### b. The exchange rate of the Japanese yen against the U.S. dollar.
+```{r}
+jpy_symbol <- "DEXJPUS"
+getSymbols(jpy_symbol, src = "FRED")
+dexjpus_data <- data.frame(Date = index(DEXJPUS), DEXJPUS = coredata(DEXJPUS))
+
+start_date <- as.Date(max(dexjpus_data$Date)) - 3650 # extracted 10 yr time frame
+dexjpus_10yr <- dexjpus_data %>%
+  filter(Date >= start_date)
+
+ggplot(dexjpus_10yr, aes(x = Date, y = DEXJPUS)) +
+  geom_line(color = "darkgreen") +
+  labs(title = "U.S. Dollar to Japanese Yen Exchange Rate (DEXJPUS)",
+       x = "Date", y = "Exchange Rate")
+```
+
+### c. 10yr treasury constant maturity yield
+```{r}
+treasury_symbol <- "T10YFF"
+getSymbols(treasury_symbol, src = "FRED")
+t10yff_data <- data.frame(Date = index(T10YFF), T10YFF = coredata(T10YFF))
+
+start_date <- as.Date(max(t10yff_data$Date)) - 365*30 # timeframe=30yrs 
+t10yff_10yr <- t10yff_data %>%
+  filter(Date >= start_date)
+
+ggplot(t10yff_10yr, aes(x = Date, y = T10YFF)) +
+  geom_line(color = "blue") +
+  labs(title = "10-Year Treasury Constant Maturity Minus Federal Funds Rate Spread",
+       x = "Date", y = "Spread (%)")
+```
+
+### d. The US unemployment rate
+```{r}
+unrate_symbol <- "UNRATE"
+getSymbols(unrate_symbol, src = "FRED")
+unrate_data <- data.frame(Date = index(UNRATE), UNRATE = coredata(UNRATE))
+
+start_date <- as.Date(max(unrate_data$Date)) - 365*50 # timeframe = 50yrs
+unrate_50yr <- unrate_data %>%
+  filter(Date >= start_date)
+
+ggplot(unrate_50yr, aes(x = Date, y = UNRATE)) +
+  geom_line(color = "purple") +
+  labs(title = "U.S. Unemployment Rate (Last 50 Years)",
+       x = "Date", y = "Unemployment Rate (%)")
+```
+
+Problem 3.7
+```{r}
+# Load the required library
+library(quantmod)
+
+# Step 1: Download the S&P 500 Index data using quantmod
+getSymbols("^GSPC", src = "yahoo", from = "2006-01-02")
+sp500_data <- Cl(GSPC)  # Extract the closing prices
+
+# Step 2: Calculate pt = ln(Pt)
+pt <- log(sp500_data)
+
+# Step 3: Calculate daily returns Rt = pt - pt-1
+Rt <- diff(pt)  # Daily returns
+Rt <- na.omit(Rt)  # Remove NA values
+
+# Step 4: Compute sample moments
+mean_return <- mean(Rt)
+variance_return <- var(Rt)
+skewness_return <- sum((Rt - mean_return)^3) / (length(Rt) * sd(Rt)^3)
+kurtosis_return <- sum((Rt - mean_return)^4) / (length(Rt) * sd(Rt)^4) - 3
+
+# Print the sample moments
+mean_return
+variance_return
+skewness_return
+kurtosis_return
+```
+
+The mean, variance, skewness, and kurtosis are displayed above respectively.
+
+```{r}
+# Step 5: Plot histogram of returns
+hist(Rt, breaks = 30, main = "Histogram of Daily Returns", xlab = "Returns", col = "blue")
+
+# Step 6: Create lagged return variables
+Rt_lag1 <- Lag(Rt, k = 1)
+Rt_lag2 <- Lag(Rt, k = 2)
+Rt_lag3 <- Lag(Rt, k = 3)
+Rt_lag4 <- Lag(Rt, k = 4)
+
+# Step 7: Create scatter plots of Rt against lagged returns
+par(mfrow = c(2, 2))  # Set up plotting area for 4 plots
+plot(Rt_lag1, Rt, xlab = "Rt-1", ylab = "Rt", main = "Rt vs Rt-1")
+plot(Rt_lag2, Rt, xlab = "Rt-2", ylab = "Rt", main = "Rt vs Rt-2")
+plot(Rt_lag3, Rt, xlab = "Rt-3", ylab = "Rt", main = "Rt vs Rt-3")
+plot(Rt_lag4, Rt, xlab = "Rt-4", ylab = "Rt", main = "Rt vs Rt-4")
+```
+
+# Textbook C
+
+## Problem 3
+```{r}
+# Load necessary libraries
+library(readr)
+library(tsibble)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Step 1: Load the data from the CSV file
+tute1 <- read_csv("~/Downloads/tute1.csv")
+
+# Step 2: Convert 'Quarter' column to year-quarter format
+tute1 <- tute1 %>%
+  mutate(Quarter = yearquarter(as.Date(Quarter, format = "%m/%d/%y")))
+
+# Step 3: Convert to tsibble (time series tibble)
+mytimeseries <- tute1 |>
+  as_tsibble(index = Quarter)
+
+# Step 4: Pivot and plot the time series data
+mytimeseries |>
+  pivot_longer(-Quarter, names_to = "name", values_to = "value") |>
+  ggplot(aes(x = Quarter, y = value, colour = name)) +
+  geom_line() +
+  facet_grid(name ~ ., scales = "free_y")
+```
+
+## Problem 4
+```{r}
+# Load necessary libraries
+library(USgas)
+library(tsibble)
+library(ggplot2)
+
+# Load the data and convert to tsibble
+data("us_total")
+us_gas_tsibble <- us_total %>%
+  as_tsibble(index = year, key = state)
+
+# Filter for New England states and plot
+new_england_states <- c("Maine", "Vermont", "New Hampshire", "Massachusetts", "Connecticut", "Rhode Island")
+new_england_data <- us_gas_tsibble %>%
+  filter(state %in% new_england_states)
+
+ggplot(new_england_data, aes(x = year, y = y, color = state)) +
+  geom_line() +
+  labs(title = "Natural Gas Consumption by State (New England)",
+       x = "Year", y = "Natural Gas Consumption", color = "State")
+```
+
+
+## Problem 5
+```{r}
+# Load necessary libraries
+library(readxl)   # For reading Excel files
+library(tsibble)  # For working with tsibbles
+
+# Read the tourism data from the Excel file
+tourism_data <- read_excel("~/Desktop/tourism.xlsx")
+View(tourism_data)
+
+# Create a tsibble identical to the tourism tsibble from the tsibble package
+# Convert Quarter to a Date type if it is not already
+tourism_data$Quarter <- as.Date(tourism_data$Quarter)
+
+# Convert the original tourism data into a tsibble
+tourism_tsibble <- as_tsibble(tourism_data, index = Quarter, key = c(Region, Purpose))
+
+# Find the combination of Region and Purpose with the maximum average overnight trips
+# Calculate the average trips for each combination of Region and Purpose
+average_trips <- aggregate(Trips ~ Region + Purpose, data = tourism_tsibble, FUN = mean, na.rm = TRUE)
+
+# Find the combination with the maximum average trips
+max_average_trips <- average_trips[which.max(average_trips$Trips), ]
+
+# Print the combination with maximum average trips
+print(max_average_trips)
+
+# Create a new data frame with total trips by State, combining Purposes and Regions
+# Calculate total trips by State and Purpose
+total_trips_by_state <- aggregate(Trips ~ State + Purpose, data = tourism_tsibble, FUN = sum, na.rm = TRUE)
+
+# If you want to create a tsibble, make sure to include a suitable index
+# Here, we can use a sequential index for demonstration
+total_trips_by_state$Index <- 1:nrow(total_trips_by_state)
+
+# Convert to tsibble using the new Index column
+total_trips_by_state_tsibble <- as_tsibble(total_trips_by_state, index = Index, key = Purpose)
+
+# View the new tsibble
+print(total_trips_by_state_tsibble)
+```
+
+## Problem 8
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# # Load the required libraries
+# library(fpp3)
+#
+# # Data for the five time series
+# us_employment_data <- us_employment %>% filter(Series_ID == "CES0500000001")
+# aus_production_data <- aus_production
+# pelt_data <- pelt
+# pbs_data <- PBS
+# us_gasoline_data <- us_gasoline
+```
+
+Couldn't debug.
+
+## Problem 3.3
+
+## Problem 1
+```{r}
+# Load necessary library
+library(fpp3)
+
+# Calculate GDP per capita for each country
+global_economy <- global_economy %>%
+  mutate(GDP_per_capita = GDP / Population)
+
+# Plot GDP per capita over time for each country
+global_economy %>%
+  ggplot(aes(x = Year, y = GDP_per_capita, color = Country)) +
+  geom_line() +
+  labs(title = "GDP per Capita over Time by Country", y = "GDP per Capita", x = "Year")
+
+# Find the country with the highest GDP per capita at any point in time
+highest_gdp_country <- global_economy %>%
+  filter(GDP_per_capita == max(GDP_per_capita, na.rm = TRUE))
+
+highest_gdp_country %>%
+  select(Country, Year, GDP_per_capita)
+```
+
+## Problem 7
+```{r}
+# Load necessary library
+library(fpp3)
+
+# Select the last 5 years (20 quarters) of Gas data
+gas <- tail(aus_production, 5*4) %>%
+  select(Gas)
+
+# Plot the time series
+autoplot(gas) +
+  labs(title = "Gas Production (Last 5 Years)", y = "Gas Produced", x = "Year")
+
+# Apply classical decomposition (multiplicative)
+gas_decomp <- gas %>%
+  model(classical_decomposition(Gas, type = "multiplicative"))
+
+# Extract the components and plot the decomposed data
+components <- components(gas_decomp)
+autoplot(components) +
+  labs(title = "Multiplicative Decomposition of Gas Data")
+
+# Seasonally adjust data and plot
+seasonally_adjusted <- components %>%
+  mutate(seasonally_adjusted = Gas / seasonal)
+autoplot(seasonally_adjusted, seasonally_adjusted) +
+  labs(title = "Seasonally Adjusted Gas Data", y = "Seasonally Adjusted Gas")
+
+# Introduce an outlier (add 300 to the first observation)
+gas_outlier <- gas
+gas_outlier$Gas[1] <- gas_outlier$Gas[1] + 300
+
+# Apply decomposition with the outlier and plot
+gas_decomp_outlier <- gas_outlier %>%
+  model(classical_decomposition(Gas, type = "multiplicative"))
+components_outlier <- components(gas_decomp_outlier)
+seasonally_adjusted_outlier <- components_outlier %>%
+  mutate(seasonally_adjusted = Gas / seasonal)
+autoplot(seasonally_adjusted_outlier, seasonally_adjusted) +
+  labs(title = "Seasonally Adjusted Data (With Outlier)")
+```
