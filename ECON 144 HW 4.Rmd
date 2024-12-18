@@ -1,0 +1,368 @@
+---
+title: "ECON 144 HW 4"
+author: "Leonard Zhu"
+date: "2024-11-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(vars)
+library(lmtest)
+```
+
+```{r}
+# Load data
+data <- read_xlsx("~/Downloads/msa1_data.xlsx")
+msa1_data <- read_xlsx("~/Downloads/msa1_data.xlsx")
+msa2_data <- read_xlsx("~/Downloads/msa2_data.xlsx")
+
+# Ensure the data is sorted by year and month
+msa1_data <- msa1_data %>% arrange(Year, Month)
+msa2_data <- msa2_data %>% arrange(Year, Month)
+
+# Calculate price growth for both MSAs (log difference of the index)
+msa1_data <- msa1_data %>% mutate(growth = c(NA, diff(log(Index_SA))))
+msa2_data <- msa2_data %>% mutate(growth = c(NA, diff(log(Index_SA))))
+
+# Combine both datasets for analysis
+combined_data <- data.frame(
+  Year = msa1_data$Year,
+  Month = msa1_data$Month,
+  MSA1_growth = msa1_data$growth,
+  MSA2_growth = msa2_data$growth
+)
+
+# Remove rows with NA values
+combined_data <- combined_data %>% drop_na()
+
+# Split data into estimation (training) and prediction (test) samples
+set.seed(123)
+n <- nrow(combined_data)
+test_size <- 20  # At least 20 observations for the prediction sample
+train_data <- combined_data[1:(n - test_size), ]
+test_data <- combined_data[(n - test_size + 1):n, ]
+```
+
+```{r}
+# Select optimal lag length
+lag_selection <- VARselect(train_data[, c("MSA1_growth", "MSA2_growth")], lag.max = 10, type = "const")
+optimal_lags <- lag_selection$selection["AIC(n)"]  # Using AIC criterion
+
+# Fit the VAR model
+var_model <- VAR(train_data[, c("MSA1_growth", "MSA2_growth")], p = optimal_lags, type = "const")
+
+# Summary of the VAR model
+summary(var_model)
+```
+
+```{r}
+# Test if MSA1 growth Granger-causes MSA2 growth
+granger_test1 <- causality(var_model, cause = "MSA1_growth")
+granger_test1
+
+# Test if MSA2 growth Granger-causes MSA1 growth
+granger_test2 <- causality(var_model, cause = "MSA2_growth")
+granger_test2
+```
+
+```{r}
+# Compute and plot impulse-response functions
+irf <- irf(var_model, impulse = "MSA1_growth", response = "MSA2_growth", n.ahead = 12, boot = TRUE)
+plot(irf)
+
+# Repeat for other combinations
+irf2 <- irf(var_model, impulse = "MSA2_growth", response = "MSA1_growth", n.ahead = 12, boot = TRUE)
+plot(irf2)
+```
+
+```{r}
+
+library(tidyverse)
+library(forecast)
+library(tsibble)
+library(feasts)
+library(stats)
+
+# Load the data
+library(readxl)
+retail_data <- read_excel("~/Downloads/retail.xlsx", sheet = "Data1")
+
+# Convert to a time series object
+turnover_ts <- ts(retail_data$Turnover, start = c(1982, 4), frequency = 12)
+
+# Display the first few rows of the data
+head(turnover_ts)
+```
+
+
+```{r}
+# Apply Holt-Winters' multiplicative method
+hw_model <- HoltWinters(turnover_ts, seasonal = "multiplicative")
+
+# Plot the fitted model using base R
+plot(hw_model, main = "Holt-Winters Multiplicative Fit", col = "blue", lty = 1)
+
+# Summarize the model
+summary(hw_model)
+```
+
+```{r}
+# Fit the damped Holt-Winters model
+hw_damped <- ets(turnover_ts, model = "MAM")
+
+# Plot the damped trend model
+autoplot(hw_damped) +
+  ggtitle("Holt-Winters with Damped Trend")
+```
+
+```{r}
+# Calculate one-step forecasts
+fitted_hw <- fitted(hw_model)
+fitted_damped <- fitted(hw_damped)
+
+# Compute RMSE
+rmse_hw <- sqrt(mean((turnover_ts - fitted_hw[,1])^2, na.rm = TRUE))
+rmse_damped <- sqrt(mean((turnover_ts - fitted_damped)^2, na.rm = TRUE))
+
+# Display RMSE
+rmse_hw
+rmse_damped
+```
+
+```{r}
+# Determine the best model
+best_model <- if (rmse_hw < rmse_damped) hw_model else hw_damped
+
+# Extract residuals
+residuals_best <- residuals(best_model)
+
+# Check if residuals are valid
+if (is.null(residuals_best)) {
+  stop("Residuals could not be extracted from the best model.")
+}
+
+# Plot residuals using base R
+plot(residuals_best, main = "Residuals from Best Model", 
+     ylab = "Residuals", xlab = "Time", col = "blue")
+abline(h = 0, col = "red", lty = 2)
+
+# Use checkresiduals for diagnostics
+checkresiduals(best_model)
+```
+
+```{r}
+## STL Decomposition with ETS on Seasonally Adjusted Data
+library(forecast)
+library(ggplot2)
+
+# Define the cutoff for training and test sets
+cutoff <- c(2010, 12)  # Example: up to December 2010
+train_set <- window(turnover_ts, end = cutoff)
+test_set <- window(turnover_ts, start = c(2011, 1))
+
+# Box-Cox Transformation
+lambda <- BoxCox.lambda(train_set)  # Optimal lambda for training set
+train_boxcox <- BoxCox(train_set, lambda)
+
+# STL Decomposition
+stl_fit <- stl(train_boxcox, s.window = "periodic")
+
+# Seasonally Adjusted Data
+seasonally_adjusted <- seasadj(stl_fit)
+
+# Fit ETS Model on Seasonally Adjusted Data
+ets_model <- ets(seasonally_adjusted)
+
+# Forecasting on the Test Set Horizon
+ets_forecast <- forecast(ets_model, h = length(test_set))
+
+# Reverse Box-Cox Transformation for Forecasts
+ets_forecast$mean <- InvBoxCox(ets_forecast$mean, lambda)
+ets_forecast$lower <- InvBoxCox(ets_forecast$lower, lambda)
+ets_forecast$upper <- InvBoxCox(ets_forecast$upper, lambda)
+
+# Calculate RMSE
+rmse_ets <- sqrt(mean((test_set - ets_forecast$mean)^2, na.rm = TRUE))
+
+# Visualize the Results
+autoplot(turnover_ts, series = "Actual Data") +
+  autolayer(ets_forecast$mean, series = "STL + ETS Forecast") +
+  autolayer(test_set, series = "Test Set") +
+  ggtitle("Forecast Comparison: STL + ETS vs Test Set") +
+  ylab("Turnover") + xlab("Time") +
+  theme_minimal()
+
+# Output RMSE
+cat("RMSE of STL + ETS model: ", rmse_ets, "\n")
+```
+
+# Problem 7.11
+
+```{r}
+library(fpp2)
+# Load and plot data
+data("visitors")
+
+autoplot(visitors) +
+  ggtitle("Monthly Australian Short-Term Overseas Visitors") +
+  ylab("Visitors (in thousands)") +
+  xlab("Year") +
+  theme_minimal()
+```
+
+```{r}
+# Split data into training (up to Apr 2003) and test sets (May 2003–Apr 2005)
+train_set <- window(visitors, end = c(2003, 4))
+test_set <- window(visitors, start = c(2003, 5))
+
+# Check data
+autoplot(train_set) +
+  autolayer(test_set, series = "Test Set", PI = FALSE) +
+  ggtitle("Training and Test Sets") +
+  ylab("Visitors (in thousands)") +
+  xlab("Year") +
+  theme_minimal()
+```
+
+```{r}
+# Fit Holt-Winters multiplicative model
+hw_model <- hw(train_set, seasonal = "multiplicative")
+
+# Forecast and plot
+hw_forecast <- forecast(hw_model, h = length(test_set))
+
+autoplot(visitors) +
+  autolayer(hw_forecast$mean, series = "HW Forecast", PI = FALSE) +
+  autolayer(test_set, series = "Test Set", PI = FALSE) +
+  ggtitle("Holt-Winters Multiplicative Forecast") +
+  ylab("Visitors (in thousands)") +
+  xlab("Year") +
+  theme_minimal()
+
+# Calculate RMSE
+rmse_hw <- sqrt(mean((test_set - hw_forecast$mean)^2, na.rm = TRUE))
+cat("RMSE (Holt-Winters Multiplicative):", rmse_hw, "\n")
+```
+
+```{r}
+# Automatic ETS model
+ets_model <- ets(train_set)
+ets_forecast <- forecast(ets_model, h = length(test_set))
+
+# RMSE
+rmse_ets <- sqrt(mean((test_set - ets_forecast$mean)^2, na.rm = TRUE))
+cat("RMSE (ETS):", rmse_ets, "\n")
+```
+
+```{r}
+# Box-Cox Transformation
+lambda <- BoxCox.lambda(train_set)
+train_boxcox <- BoxCox(train_set, lambda)
+
+# Fit ETS model
+ets_boxcox_model <- ets(train_boxcox)
+ets_boxcox_forecast <- forecast(ets_boxcox_model, h = length(test_set))
+
+# Reverse Box-Cox Transformation
+ets_boxcox_forecast$mean <- InvBoxCox(ets_boxcox_forecast$mean, lambda)
+
+# RMSE
+rmse_ets_boxcox <- sqrt(mean((test_set - ets_boxcox_forecast$mean)^2, na.rm = TRUE))
+cat("RMSE (ETS with Box-Cox):", rmse_ets_boxcox, "\n")
+```
+
+```{r}
+# Seasonal Naïve Forecast
+snaive_forecast <- snaive(train_set, h = length(test_set))
+
+# RMSE
+rmse_snaive <- sqrt(mean((test_set - snaive_forecast$mean)^2, na.rm = TRUE))
+cat("RMSE (Seasonal Naïve):", rmse_snaive, "\n")
+```
+
+```{r}
+# STL Decomposition
+stl_fit <- stl(BoxCox(train_set, lambda), s.window = "periodic")
+
+# Seasonally Adjusted Data
+seasonally_adjusted <- seasadj(stl_fit)
+
+# ETS Model on Seasonally Adjusted Data
+stl_ets_model <- ets(seasonally_adjusted)
+stl_ets_forecast <- forecast(stl_ets_model, h = length(test_set))
+
+# Reverse Box-Cox Transformation
+stl_ets_forecast$mean <- InvBoxCox(stl_ets_forecast$mean, lambda)
+
+# RMSE
+rmse_stl_ets <- sqrt(mean((test_set - stl_ets_forecast$mean)^2, na.rm = TRUE))
+cat("RMSE (STL + ETS):", rmse_stl_ets, "\n")
+```
+
+```{r}
+# Print all RMSE values
+rmse_values <- data.frame(
+  Method = c("Holt-Winters", "ETS", "ETS + Box-Cox", "Seasonal Naive", "STL + ETS"),
+  RMSE = c(rmse_hw, rmse_ets, rmse_ets_boxcox, rmse_snaive, rmse_stl_ets)
+)
+
+print(rmse_values)
+
+# Best model
+best_model <- rmse_values[which.min(rmse_values$RMSE), ]
+cat("Best Model: ", best_model$Method, " with RMSE: ", best_model$RMSE, "\n")
+```
+
+```{r}
+# Check residuals of the best model
+if (best_model$Method == "Holt-Winters") {
+  residuals_best <- residuals(hw_model)
+} else if (best_model$Method == "ETS") {
+  residuals_best <- residuals(ets_model)
+} else if (best_model$Method == "ETS + Box-Cox") {
+  residuals_best <- residuals(ets_boxcox_model)
+} else if (best_model$Method == "Seasonal Naive") {
+  residuals_best <- residuals(snaive_forecast)
+} else {
+  residuals_best <- residuals(stl_ets_model)
+}
+
+autoplot(residuals_best) +
+  ggtitle("Residuals from Best Model") +
+  theme_minimal()
+
+checkresiduals(residuals_best)
+```
+
+```{r}
+# Use tsCV for time series cross-validation
+cv_rmse <- function(forecast_function, h) {
+  sqrt(mean(tsCV(visitors, forecast_function, h = h)^2, na.rm = TRUE))
+}
+
+# Compute RMSE for each method using cross-validation
+cv_hw <- cv_rmse(function(x, h) hw(x, h = h, seasonal = "multiplicative"), h = 24)
+cv_ets <- cv_rmse(function(x, h) forecast(ets(x), h = h), h = 24)
+cv_snaive <- cv_rmse(function(x, h) snaive(x, h = h), h = 24)
+cv_stl_ets <- cv_rmse(function(x, h) {
+  lambda <- BoxCox.lambda(x)
+  seasadj_fit <- seasadj(stl(BoxCox(x, lambda), s.window = "periodic"))
+  forecast(ets(seasadj_fit), h = h)$mean
+}, h = 24)
+
+# Print cross-validation results
+cv_results <- data.frame(
+  Method = c("Holt-Winters", "ETS", "Seasonal Naive", "STL + ETS"),
+  CV_RMSE = c(cv_hw, cv_ets, cv_snaive, cv_stl_ets)
+)
+
+print(cv_results)
+```

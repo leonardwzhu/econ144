@@ -1,0 +1,301 @@
+---
+title: "ECON 144 HW 5"
+author: "Leonard Zhu"
+date: "2024-11-29"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+# Load required libraries
+library(quantmod)  # For financial data
+library(tseries)   # For time series analysis
+library(rugarch)   # For ARCH/GARCH modeling
+```
+
+# Problem 14.3
+
+```{r}
+# Step 1: Fetch S&P 500 data from Yahoo Finance
+getSymbols("^GSPC", src = "yahoo", from = "2000-01-01")
+
+# Extract the adjusted closing prices
+sp500 <- GSPC$GSPC.Adjusted
+
+# Convert to a time series object
+sp500_ts <- as.numeric(sp500)  # Ensure numeric format
+sp500_dates <- index(GSPC)     # Get the dates
+sp500_df <- data.frame(Date = sp500_dates, SP500 = sp500_ts)
+```
+
+```{r}
+# Step 2: Plot the S&P 500 Index
+plot(sp500_dates, sp500_ts, type = "l", main = "S&P 500 Index Over Time", 
+     xlab = "Date", ylab = "Adjusted Closing Price", col = "blue")
+```
+
+```{r}
+# Step 3: Compute daily returns
+returns <- diff(log(sp500_ts))  # Log returns to stabilize variance
+
+# Plot returns
+plot(sp500_dates[-1], returns, type = "l", main = "Daily Log Returns of S&P 500",
+     xlab = "Date", ylab = "Log Returns", col = "red")
+
+# Step 4: Compute autocorrelation functions (ACF) for returns and squared returns
+acf(returns, main = "ACF of Log Returns")
+acf(returns^2, main = "ACF of Squared Log Returns")
+```
+
+```{r}
+# Step 5: Fit an ARCH model to volatility
+# Specify an ARCH(1) model
+arch_model <- garch(returns, order = c(0, 1))  # ARCH(1)
+summary(arch_model)
+
+# Try ARCH models with different lags
+for (p in 1:5) {
+  model <- garch(returns, order = c(0, p))
+  print(paste("ARCH(", p, ") AIC:", AIC(model)))
+}
+```
+
+```{r}
+# Step 6: Fit a GARCH model
+# Specify a GARCH(1,1) model
+spec_garch <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                         mean.model = list(armaOrder = c(0, 0), include.mean = TRUE))
+garch_model <- ugarchfit(spec = spec_garch, data = returns)
+summary(garch_model)
+
+# Compare AIC values
+for (q in 1:3) {
+  for (p in 1:3) {
+    spec <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(p, q)),
+                       mean.model = list(armaOrder = c(0, 0), include.mean = TRUE))
+    model <- ugarchfit(spec = spec, data = returns)
+    print(paste("GARCH(", p, ",", q, ") AIC:", infocriteria(model)[1]))
+  }
+}
+```
+
+# Problem 14.4
+
+```{r}
+# Step 1: Fetch S&P 500 data and calculate returns
+getSymbols("^GSPC", src = "yahoo", from = "2000-01-01")
+sp500 <- GSPC$GSPC.Adjusted
+
+# Calculate log returns
+returns <- diff(log(sp500))[-1]  # Exclude the first NA
+```
+
+```{r}
+# Step 2: Fit a GARCH(1,1) model
+spec_garch <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                         mean.model = list(armaOrder = c(0, 0), include.mean = TRUE))
+garch_model <- ugarchfit(spec = spec_garch, data = returns)
+summary(garch_model)
+```
+
+```{r}
+# Step 3: Generate volatility forecasts
+forecast <- ugarchforecast(garch_model, n.ahead = 2)
+
+# Extract forecasts
+volatility_1step <- sigma(forecast)[1]  # One-step ahead volatility
+volatility_2step <- sigma(forecast)[2]  # Two-step ahead volatility
+
+cat("One-step ahead volatility:", volatility_1step, "\n")
+cat("Two-step ahead volatility:", volatility_2step, "\n")
+```
+
+```{r}
+# Step 4: Construct 95% interval forecasts
+# Assumption: Returns are conditionally normal
+mean_forecast <- fitted(forecast)  # Mean return forecast
+z_critical <- qnorm(0.975)         # 1.96 for 95% confidence interval
+
+# One-step ahead forecast
+lower_1step <- mean_forecast[1] - z_critical * volatility_1step
+upper_1step <- mean_forecast[1] + z_critical * volatility_1step
+
+# Two-step ahead forecast
+lower_2step <- mean_forecast[2] - z_critical * volatility_2step
+upper_2step <- mean_forecast[2] + z_critical * volatility_2step
+
+# Display results
+cat("One-step ahead 95% CI: [", lower_1step, ",", upper_1step, "]\n")
+cat("Two-step ahead 95% CI: [", lower_2step, ",", upper_2step, "]\n")
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+```
+
+# Problem 14.5
+
+```{r}
+# Step 1: Download CPI and GDP data from FRED
+getSymbols("CPIAUCSL", src = "FRED")  # US CPI (All Urban Consumers, Seasonally Adjusted)
+getSymbols("GDP", src = "FRED")       # US GDP (Chained 2012 Dollars)
+
+# Convert data to time series
+cpi <- CPIAUCSL  # CPI
+gdp <- GDP       # GDP
+```
+
+```{r}
+# Step 2: Calculate inflation rate from CPI
+# Inflation rate = log difference of CPI
+inflation_rate <- diff(log(cpi)) * 100  # Convert to percentage
+
+# Step 3: Calculate GDP growth rate
+# GDP growth = log difference of GDP
+gdp_growth <- diff(log(gdp)) * 100  # Convert to percentage
+```
+
+```{r}
+# Step 4: Calculate unconditional means
+mean_inflation <- mean(inflation_rate, na.rm = TRUE)
+mean_gdp_growth <- mean(gdp_growth, na.rm = TRUE)
+
+cat("Unconditional mean of inflation rate:", mean_inflation, "\n")
+cat("Unconditional mean of GDP growth rate:", mean_gdp_growth, "\n")
+```
+
+```{r}
+# Step 5: Fit GARCH models for inflation rate
+# Specify a GARCH(1,1) model for inflation rate
+spec_inflation <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                             mean.model = list(armaOrder = c(0, 0), include.mean = TRUE))
+garch_inflation <- ugarchfit(spec = spec_inflation, data = na.omit(inflation_rate))
+summary(garch_inflation)
+
+# Fit GARCH models for GDP growth
+spec_gdp <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                       mean.model = list(armaOrder = c(0, 0), include.mean = TRUE))
+garch_gdp <- ugarchfit(spec = spec_gdp, data = na.omit(gdp_growth))
+summary(garch_gdp)
+```
+
+```{r}
+# Step 6: Generate 1-step-ahead volatility forecasts
+# Inflation rate forecast
+forecast_inflation <- ugarchforecast(garch_inflation, n.ahead = 1)
+volatility_inflation <- sigma(forecast_inflation)
+
+# GDP growth forecast
+forecast_gdp <- ugarchforecast(garch_gdp, n.ahead = 1)
+volatility_gdp <- sigma(forecast_gdp)
+
+cat("1-step-ahead volatility forecast for inflation rate:", volatility_inflation, "\n")
+cat("1-step-ahead volatility forecast for GDP growth:", volatility_gdp, "\n")
+```
+
+```{r}
+# Step 7: Construct 95% confidence intervals
+# Critical z-value for 95% CI
+z_critical <- qnorm(0.975)
+
+# Inflation rate CI
+mean_inflation_forecast <- fitted(forecast_inflation)
+lower_inflation <- mean_inflation_forecast - z_critical * volatility_inflation
+upper_inflation <- mean_inflation_forecast + z_critical * volatility_inflation
+
+# GDP growth CI
+mean_gdp_forecast <- fitted(forecast_gdp)
+lower_gdp <- mean_gdp_forecast - z_critical * volatility_gdp
+upper_gdp <- mean_gdp_forecast + z_critical * volatility_gdp
+
+cat("95% CI for inflation rate: [", lower_inflation, ",", upper_inflation, "]\n")
+cat("95% CI for GDP growth rate: [", lower_gdp, ",", upper_gdp, "]\n")
+```
+
+```{r, include=FALSE}
+# Load required libraries
+library(fpp3)     # Time series analysis
+library(forecast) # For forecasting models
+library(readxl)
+```
+
+# Problem 12.2 & Problem 12.3
+
+```{r}
+# Step 1: Load the dataset (replace 'us_gasoline.csv' with the actual file name)
+us_gasoline <- read_excel("~/Downloads/us_gasoline.xlsx")
+
+# Step 2: Convert to a tsibble (time-series tibble)
+us_gasoline <- us_gasoline %>%
+  mutate(Week = as.Date(Week, format = "%m/%d/%y")) %>%
+  as_tsibble(index = Week)
+```
+
+```{r}
+# Step 3: Fit a dynamic harmonic regression model
+gasoline_dhr <- us_gasoline %>%
+  model(
+    harmonic = TSLM(Gasoline ~ trend() + fourier(K = 2))  # Adjust K if needed
+  )
+
+# Summary of the harmonic model
+report(gasoline_dhr)
+```
+
+```{r}
+# Step 4: Fit a regression model
+gasoline_reg <- us_gasoline %>%
+  model(
+    regression = TSLM(Gasoline ~ trend() + season())
+  )
+
+# Summary of the regression model
+report(gasoline_reg)
+```
+
+```{r}
+# Step 5: Residual diagnostics
+# Extract residuals from both models
+gasoline_dhr_residuals <- augment(gasoline_dhr) %>% filter(.model == "harmonic")
+gasoline_reg_residuals <- augment(gasoline_reg) %>% filter(.model == "regression")
+
+# Plot residuals
+autoplot(gasoline_dhr_residuals, .resid) + ggtitle("Harmonic Model Residuals")
+autoplot(gasoline_reg_residuals, .resid) + ggtitle("Regression Model Residuals")
+
+# Ljung-Box test for residual autocorrelation
+ljung_box_dhr <- gasoline_dhr_residuals %>% features(.resid, ljung_box)
+ljung_box_reg <- gasoline_reg_residuals %>% features(.resid, ljung_box)
+
+ljung_box_dhr
+ljung_box_reg
+```
+
+```{r}
+# Step 6: Fit alternative models (ARIMA, ETS, NNETAR)
+
+# ARIMA Model
+gasoline_arima <- us_gasoline %>%
+  model(ARIMA = ARIMA(Gasoline))
+
+# ETS Model
+gasoline_ets <- us_gasoline %>%
+  model(ETS = ETS(Gasoline))
+
+# NNETAR Model
+gasoline_nnetar <- us_gasoline %>%
+  model(NNETAR = NNETAR(Gasoline))
+
+# Compare models using AIC
+model_comparisons <- glance(gasoline_dhr, gasoline_reg, gasoline_arima, gasoline_ets, gasoline_nnetar)
+model_comparisons
+```
+
+```{r}
+# Step 7: Forecast using NNETAR
+nnetar_forecast <- gasoline_nnetar %>%
+  forecast(h = 12)  # Forecast for 12 weeks ahead
+
+# Plot forecast
+autoplot(nnetar_forecast) + 
+  ggtitle("NNETAR Forecast for Gasoline Supply")
+```

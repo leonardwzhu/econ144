@@ -1,0 +1,138 @@
+---
+title: "ECON 144 Proj 3"
+author: "Leonard Zhu"
+date: "2024-12-05"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(forecast)
+library(tidyverse)
+library(prophet)
+library(tsibble)
+library(fable)
+```
+
+# I. Introduction
+
+The S&P 500 Index is a widely recognized benchmark for the U.S. stock market, representing the performance of 500 large-cap companies. This project analyzes daily S&P 500 closing values for forecasting, focusing on trends, seasonality, and predictive accuracy. Data was retrieved from Yahoo Finance using the quantmod package in R.
+
+```{r}
+library(quantmod)
+
+# Fetch S&P 500 data
+getSymbols("^GSPC", src = "yahoo", from = "2010-01-01", to = "2023-12-31")
+sp500 <- Cl(GSPC)  # Closing prices
+sp500_ts <- ts(sp500, frequency = 252)  # Convert to time series (252 trading days/year)
+
+# Plot the data
+autoplot(sp500_ts) +
+  labs(title = "S&P 500 Closing Prices (2010-2023)", x = "Year", y = "Price")
+```
+
+# II. Results
+
+## 1. ARIMA Model
+
+```{r}
+# Fit ARIMA model
+arima_fit <- auto.arima(sp500_ts)
+summary(arima_fit)
+
+# Forecast with ARIMA
+arima_forecast <- forecast(arima_fit, h = 252)  # Forecast 1 year ahead
+autoplot(arima_forecast) +
+  labs(title = "ARIMA Forecast", x = "Year", y = "Price")
+```
+
+## 2. ETS Model
+
+```{r}
+# Fit ETS model
+ets_fit <- ets(sp500_ts)
+summary(ets_fit)
+
+# Forecast with ETS
+ets_forecast <- forecast(ets_fit, h = 252)
+autoplot(ets_forecast) +
+  labs(title = "ETS Forecast", x = "Year", y = "Price")
+```
+
+## 3. Holt-Winters Model
+
+```{r}
+# Fit Holt-Winters model
+hw_fit <- HoltWinters(sp500_ts)
+hw_forecast <- forecast(hw_fit, h = 252)
+autoplot(hw_forecast) +
+  labs(title = "Holt-Winters Forecast", x = "Year", y = "Price")
+```
+
+## 4. NNETAR Model
+
+```{r}
+# Fit Neural Network model
+nnetar_fit <- nnetar(sp500_ts)
+summary(nnetar_fit)
+
+# Forecast with NNETAR
+nnetar_forecast <- forecast(nnetar_fit, h = 252)
+autoplot(nnetar_forecast) +
+  labs(title = "NNETAR Forecast", x = "Year", y = "Price")
+```
+
+## 5. Prophet Model
+
+```{r}
+# Prepare data for Prophet
+sp500_df <- data.frame(ds = index(sp500), y = as.numeric(sp500))
+prophet_fit <- prophet(sp500_df)
+
+# Future data frame
+future <- make_future_dataframe(prophet_fit, periods = 252)
+forecast_prophet <- predict(prophet_fit, future)
+
+# Plot Prophet Forecast
+prophet_plot <- plot(prophet_fit, forecast_prophet) +
+  labs(title = "Prophet Forecast", x = "Year", y = "Price")
+prophet_plot
+```
+
+## 6. Forecast Combination
+
+```{r}
+# Combine forecasts using average
+combined_forecast <- (arima_forecast$mean + ets_forecast$mean + hw_forecast$mean) / 3
+autoplot(sp500_ts) +
+  autolayer(combined_forecast, series = "Combined Forecast") +
+  labs(title = "Forecast Combination", x = "Year", y = "Price")
+```
+
+## 7. Model Performance Evaluation
+
+```{r}
+# Split data into training and testing sets
+# Determine the actual data range
+end_year <- floor(end(sp500_ts)[1])
+train <- window(sp500_ts, end = c(end_year - 1, 252))  # Train up to last complete year
+test <- window(sp500_ts, start = c(end_year, 1))       # Test on the last year
+
+
+# Calculate errors
+arima_errors <- accuracy(forecast(auto.arima(train), h = length(test)), test)
+ets_errors <- accuracy(forecast(ets(train), h = length(test)), test)
+nnetar_errors <- accuracy(forecast(nnetar(train), h = length(test)), test)
+
+# Combine results
+error_df <- data.frame(
+  Model = c("ARIMA", "ETS", "NNETAR"),
+  RMSE = c(arima_errors[2], ets_errors[2], nnetar_errors[2])
+)
+knitr::kable(error_df, caption = "Model Performance Metrics")
+```
+
+# III. Conclusions and Future Work
+
+The ARIMA model provided the lowest RMSE, making it the preferred model for this analysis. Future work could include incorporating exogenous variables (e.g., interest rates) to improve predictive accuracy.
+

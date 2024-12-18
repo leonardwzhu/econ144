@@ -1,0 +1,470 @@
+---
+title: "ECON 144 HW 4"
+author: "Leonard Zhu"
+date: "2024-11-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(vars)
+library(lmtest)
+```
+
+```{r}
+# Load data
+data <- read_xlsx("~/Downloads/msa1_data.xlsx")
+msa1_data <- read_xlsx("~/Downloads/msa1_data.xlsx")
+msa2_data <- read_xlsx("~/Downloads/msa2_data.xlsx")
+
+# Ensure the data is sorted by year and month
+msa1_data <- msa1_data %>% arrange(Year, Month)
+msa2_data <- msa2_data %>% arrange(Year, Month)
+
+# Calculate price growth for both MSAs (log difference of the index)
+msa1_data <- msa1_data %>% mutate(growth = c(NA, diff(log(Index_SA))))
+msa2_data <- msa2_data %>% mutate(growth = c(NA, diff(log(Index_SA))))
+
+# Combine both datasets for analysis
+combined_data <- data.frame(
+  Year = msa1_data$Year,
+  Month = msa1_data$Month,
+  MSA1_growth = msa1_data$growth,
+  MSA2_growth = msa2_data$growth
+)
+
+# Remove rows with NA values
+combined_data <- combined_data %>% drop_na()
+
+# Split data into estimation (training) and prediction (test) samples
+set.seed(123)
+n <- nrow(combined_data)
+test_size <- 20  # At least 20 observations for the prediction sample
+train_data <- combined_data[1:(n - test_size), ]
+test_data <- combined_data[(n - test_size + 1):n, ]
+```
+
+```{r}
+# Select optimal lag length
+lag_selection <- VARselect(train_data[, c("MSA1_growth", "MSA2_growth")], lag.max = 10, type = "const")
+optimal_lags <- lag_selection$selection["AIC(n)"]  # Using AIC criterion
+
+# Fit the VAR model
+var_model <- VAR(train_data[, c("MSA1_growth", "MSA2_growth")], p = optimal_lags, type = "const")
+
+# Summary of the VAR model
+summary(var_model)
+```
+
+```{r}
+# Test if MSA1 growth Granger-causes MSA2 growth
+granger_test1 <- causality(var_model, cause = "MSA1_growth")
+granger_test1
+
+# Test if MSA2 growth Granger-causes MSA1 growth
+granger_test2 <- causality(var_model, cause = "MSA2_growth")
+granger_test2
+```
+
+```{r}
+# Compute and plot impulse-response functions
+irf <- irf(var_model, impulse = "MSA1_growth", response = "MSA2_growth", n.ahead = 12, boot = TRUE)
+plot(irf)
+
+# Repeat for other combinations
+irf2 <- irf(var_model, impulse = "MSA2_growth", response = "MSA1_growth", n.ahead = 12, boot = TRUE)
+plot(irf2)
+```
+
+```{r}
+
+library(tidyverse)
+library(forecast)
+library(tsibble)
+library(feasts)
+library(stats)
+
+# Load the data
+library(readxl)
+retail_data <- read_excel("~/Downloads/retail.xlsx", sheet = "Data1")
+
+# Convert to a time series object
+turnover_ts <- ts(retail_data$Turnover, start = c(1982, 4), frequency = 12)
+
+# Display the first few rows of the data
+head(turnover_ts)
+```
+
+
+```{r}
+# Apply Holt-Winters' multiplicative method
+hw_model <- HoltWinters(turnover_ts, seasonal = "multiplicative")
+
+# Plot the fitted model using base R
+plot(hw_model, main = "Holt-Winters Multiplicative Fit", col = "blue", lty = 1)
+
+# Summarize the model
+summary(hw_model)
+```
+
+```{r}
+# Fit the damped Holt-Winters model
+hw_damped <- ets(turnover_ts, model = "MAM")
+
+# Plot the damped trend model
+autoplot(hw_damped) +
+  ggtitle("Holt-Winters with Damped Trend")
+```
+
+```{r}
+# Calculate one-step forecasts
+fitted_hw <- fitted(hw_model)
+fitted_damped <- fitted(hw_damped)
+
+# Compute RMSE
+rmse_hw <- sqrt(mean((turnover_ts - fitted_hw[,1])^2, na.rm = TRUE))
+rmse_damped <- sqrt(mean((turnover_ts - fitted_damped)^2, na.rm = TRUE))
+
+# Display RMSE
+rmse_hw
+rmse_damped
+```
+
+```{r}
+# Determine the best model
+best_model <- if (rmse_hw < rmse_damped) hw_model else hw_damped
+
+# Extract residuals
+residuals_best <- residuals(best_model)
+
+# Check if residuals are valid
+if (is.null(residuals_best)) {
+  stop("Residuals could not be extracted from the best model.")
+}
+
+# Plot residuals using base R
+plot(residuals_best, main = "Residuals from Best Model", 
+     ylab = "Residuals", xlab = "Time", col = "blue")
+abline(h = 0, col = "red", lty = 2)
+
+# Use checkresiduals for diagnostics
+checkresiduals(best_model)
+```
+
+```{r}
+## STL Decomposition with ETS on Seasonally Adjusted Data
+library(forecast)
+library(ggplot2)
+
+# Define the cutoff for training and test sets
+cutoff <- c(2010, 12)  # Example: up to December 2010
+train_set <- window(turnover_ts, end = cutoff)
+test_set <- window(turnover_ts, start = c(2011, 1))
+
+# Box-Cox Transformation
+lambda <- BoxCox.lambda(train_set)  # Optimal lambda for training set
+train_boxcox <- BoxCox(train_set, lambda)
+
+# STL Decomposition
+stl_fit <- stl(train_boxcox, s.window = "periodic")
+
+# Seasonally Adjusted Data
+seasonally_adjusted <- seasadj(stl_fit)
+
+# Fit ETS Model on Seasonally Adjusted Data
+ets_model <- ets(seasonally_adjusted)
+
+# Forecasting on the Test Set Horizon
+ets_forecast <- forecast(ets_model, h = length(test_set))
+
+# Reverse Box-Cox Transformation for Forecasts
+ets_forecast$mean <- InvBoxCox(ets_forecast$mean, lambda)
+ets_forecast$lower <- InvBoxCox(ets_forecast$lower, lambda)
+ets_forecast$upper <- InvBoxCox(ets_forecast$upper, lambda)
+
+# Calculate RMSE
+rmse_ets <- sqrt(mean((test_set - ets_forecast$mean)^2, na.rm = TRUE))
+
+# Visualize the Results
+autoplot(turnover_ts, series = "Actual Data") +
+  autolayer(ets_forecast$mean, series = "STL + ETS Forecast") +
+  autolayer(test_set, series = "Test Set") +
+  ggtitle("Forecast Comparison: STL + ETS vs Test Set") +
+  ylab("Turnover") + xlab("Time") +
+  theme_minimal()
+
+# Output RMSE
+cat("RMSE of STL + ETS model: ", rmse_ets, "\n")
+```
+
+# Problem 7.11
+
+```{r}
+
+# Load required libraries
+library(forecast)
+library(ggplot2)
+library(fpp2)
+
+# Load the dataset (you need to ensure the dataset is available)
+data(visitors)
+
+# Split into training (up to Apr 2003) and testing sets (May 2003–Apr 2005)
+train_set <- window(visitors, end = c(2003, 4))
+test_set <- window(visitors, start = c(2003, 5))
+
+# Holt-Winters Multiplicative Model
+hw_model <- hw(train_set, seasonal = "multiplicative")
+hw_forecast <- forecast(hw_model, h = length(test_set))
+
+# ETS Model (Automatic Selection)
+ets_model <- ets(train_set)
+ets_forecast <- forecast(ets_model, h = length(test_set))
+
+# Seasonal Naïve Model
+snaive_forecast <- snaive(train_set, h = length(test_set))
+
+# Calculate RMSE for each model
+rmse_hw <- sqrt(mean((test_set - hw_forecast$mean)^2, na.rm = TRUE))
+rmse_ets <- sqrt(mean((test_set - ets_forecast$mean)^2, na.rm = TRUE))
+rmse_snaive <- sqrt(mean((test_set - snaive_forecast$mean)^2, na.rm = TRUE))
+
+# Compare RMSE values
+rmse_values <- data.frame(
+  Method = c("Holt-Winters", "ETS", "Seasonal Naive"),
+  RMSE = c(rmse_hw, rmse_ets, rmse_snaive)
+)
+
+print(rmse_values)
+
+# Plot the best forecast
+autoplot(visitors) +
+  autolayer(hw_forecast$mean, series = "Holt-Winters Forecast", PI = FALSE) +
+  autolayer(ets_forecast$mean, series = "ETS Forecast", PI = FALSE) +
+  autolayer(snaive_forecast$mean, series = "Seasonal Naive Forecast", PI = FALSE) +
+  autolayer(test_set, series = "Test Set") +
+  ggtitle("Forecast Comparisons") +
+  xlab("Year") +
+  ylab("Visitors (in thousands)") +
+  theme_minimal()
+
+# Print the best model based on RMSE
+best_model <- rmse_values[which.min(rmse_values$RMSE), ]
+cat("Best Model:", best_model$Method, "with RMSE:", best_model$RMSE, "\n")
+
+```
+
+
+# Problem 8.13
+
+
+```{r}
+library(fpp2)        # For time series data and utilities
+library(tseries)     # For stationarity tests
+library(forecast)    # For ARIMA and ETS modeling
+
+# Load and plot the data
+data("hsales")
+autoplot(hsales) +
+  ggtitle("Monthly Sales of New One-Family Houses in the USA") +
+  ylab("Sales (in thousands)") +
+  xlab("Year") +
+  theme_minimal()
+
+# 1. Transformation (Box-Cox Test for Normality)
+lambda <- BoxCox.lambda(hsales)
+cat("Optimal Lambda (Box-Cox):", lambda, "\n")
+
+# Apply Box-Cox transformation if needed
+hsales_transformed <- BoxCox(hsales, lambda)
+
+autoplot(hsales_transformed) +
+  ggtitle("Transformed Data (Box-Cox)") +
+  ylab("Transformed Sales") +
+  xlab("Year") +
+  theme_minimal()
+
+# 2. Stationarity Check (ADF Test)
+adf_test <- adf.test(hsales_transformed)
+cat("ADF Test p-value (Original Data):", adf_test$p.value, "\n")
+
+# Differencing if not stationary
+if (adf_test$p.value > 0.05) {
+  hsales_diff <- diff(hsales_transformed, differences = 1)
+  adf_test_diff <- adf.test(hsales_diff)
+  cat("ADF Test p-value (First Differenced Data):", adf_test_diff$p.value, "\n")
+  hsales_final <- hsales_diff
+} else {
+  hsales_final <- hsales_transformed
+}
+
+autoplot(hsales_final) +
+  ggtitle("Transformed and Differenced Data (if needed)") +
+  ylab("Processed Sales") +
+  xlab("Year") +
+  theme_minimal()
+
+# 3. Identify ARIMA Models
+Acf(hsales_final, main = "ACF of Processed Data")
+Pacf(hsales_final, main = "PACF of Processed Data")
+
+# Fit a couple of ARIMA models
+arima1 <- Arima(hsales_transformed, order = c(1, 1, 1), seasonal = c(1, 0, 1))
+arima2 <- Arima(hsales_transformed, order = c(2, 1, 2), seasonal = c(1, 0, 1))
+
+# 4. Compare AIC values
+aic_values <- data.frame(
+  Model = c("ARIMA(1,1,1)(1,0,1)", "ARIMA(2,1,2)(1,0,1)"),
+  AIC = c(AIC(arima1), AIC(arima2))
+)
+print(aic_values)
+
+# Choose the best model
+best_arima <- if (AIC(arima1) < AIC(arima2)) arima1 else arima2
+cat("Best ARIMA Model Order:", best_arima$arma, "\n")
+
+# 5. Diagnostics
+checkresiduals(best_arima)
+
+# 6. Forecast 24 Months
+arima_forecast <- forecast(best_arima, h = 24)
+
+# Inverse Box-Cox Transformation for forecasts
+arima_forecast$mean <- InvBoxCox(arima_forecast$mean, lambda)
+arima_forecast$lower <- InvBoxCox(arima_forecast$lower, lambda)
+arima_forecast$upper <- InvBoxCox(arima_forecast$upper, lambda)
+
+autoplot(arima_forecast) +
+  ggtitle("ARIMA Model Forecasts (Original Scale)") +
+  ylab("Sales") +
+  xlab("Year") +
+  theme_minimal()
+
+# 7. ETS Model for Comparison
+ets_model <- ets(hsales)
+ets_forecast <- forecast(ets_model, h = 24)
+
+# Plot comparison of ETS and ARIMA forecasts
+autoplot(hsales) +
+  autolayer(ets_forecast$mean, series = "ETS Forecast") +
+  autolayer(arima_forecast$mean, series = "ARIMA Forecast") +
+  ggtitle("ETS vs ARIMA Forecasts") +
+  ylab("Sales") +
+  xlab("Year") +
+  theme_minimal()
+
+# Compare RMSE
+actual_data <- tail(hsales, 24)  # Adjust to real forecast comparison range
+rmse_arima <- sqrt(mean((actual_data - arima_forecast$mean)^2, na.rm = TRUE))
+rmse_ets <- sqrt(mean((actual_data - ets_forecast$mean)^2, na.rm = TRUE))
+
+cat("RMSE (ARIMA):", rmse_arima, "\n")
+cat("RMSE (ETS):", rmse_ets, "\n")
+```
+
+# Problem 8.18
+
+```{r}
+
+# Set CRAN mirror
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# Install and load necessary packages
+install.packages("Quandl")
+library(Quandl)
+library(fpp2)        # For ETS and time series utilities
+library(forecast)    # For ARIMA modeling
+
+# Set Quandl API key
+api_key <- "obGUtpyTHuBZqFBNevu8"  
+
+# Import data from Quandl
+y <- Quandl("FRED/GDP", api_key = api_key, type = "ts")  
+
+# Plot the data
+autoplot(y) +
+  ggtitle("Time Series Data from Quandl") +
+  ylab("Value") +
+  xlab("Year") +
+  theme_minimal()
+
+# 1. Identify an ARIMA model
+# Check for stationarity
+adf_test <- adf.test(y)
+cat("ADF Test p-value (Original Data):", adf_test$p.value, "\n")
+
+# Apply differencing if necessary
+if (adf_test$p.value > 0.05) {
+  y_diff <- diff(y)
+  adf_test_diff <- adf.test(y_diff)
+  cat("ADF Test p-value (Differenced Data):", adf_test_diff$p.value, "\n")
+  y_final <- y_diff
+} else {
+  y_final <- y
+}
+
+# Plot differenced data if applicable
+if (exists("y_diff")) {
+  autoplot(y_diff) +
+    ggtitle("Differenced Time Series Data") +
+    ylab("Differenced Value") +
+    xlab("Year") +
+    theme_minimal()
+}
+
+# Fit ARIMA model
+arima_fit <- auto.arima(y_final)
+summary(arima_fit)
+
+# Diagnostic checking
+checkresiduals(arima_fit)
+
+# Forecast next 4 years
+arima_forecast <- forecast(arima_fit, h = 4 * frequency(y))
+
+autoplot(arima_forecast) +
+  ggtitle("ARIMA Model Forecast") +
+  ylab("Value") +
+  xlab("Year") +
+  theme_minimal()
+
+# 2. Identify an ETS model
+ets_fit <- ets(y)
+summary(ets_fit)
+
+# Diagnostic checking
+checkresiduals(ets_fit)
+
+# Forecast next 4 years
+ets_forecast <- forecast(ets_fit, h = 4 * frequency(y))
+
+autoplot(ets_forecast) +
+  ggtitle("ETS Model Forecast") +
+  ylab("Value") +
+  xlab("Year") +
+  theme_minimal()
+
+# 3. Compare ARIMA and ETS
+autoplot(y) +
+  autolayer(arima_forecast$mean, series = "ARIMA Forecast", PI = FALSE) +
+  autolayer(ets_forecast$mean, series = "ETS Forecast", PI = FALSE) +
+  ggtitle("Comparison of ARIMA and ETS Forecasts") +
+  ylab("Value") +
+  xlab("Year") +
+  theme_minimal()
+
+# Calculate and compare RMSE
+actual_values <- tail(y, n = 4 * frequency(y))  
+rmse_arima <- sqrt(mean((actual_values - arima_forecast$mean)^2, na.rm = TRUE))
+rmse_ets <- sqrt(mean((actual_values - ets_forecast$mean)^2, na.rm = TRUE))
+
+cat("RMSE (ARIMA):", rmse_arima, "\n")
+cat("RMSE (ETS):", rmse_ets, "\n")
+```

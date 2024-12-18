@@ -1,0 +1,166 @@
+---
+title: "ECON 144 Proj 2"
+author: "Leonard Zhu"
+date: "2024-11-14"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(readxl)
+library(forecast)
+library(tseries)
+library(vars)
+library(ggplot2)
+```
+
+# **1. Modeling and Forecasting Trend, Seasonality, and Cycles**
+
+
+In this section, I load the data, ensure the date is formatted correctly, and merge the datasets by date to align both NVIDIA and S&P 500 data series.
+
+```{r}
+# Load NVIDIA data
+nvidia_data <- read_excel("~/Downloads/NVIDIA_Data.xlsx")
+# Load S&P500 data
+sp500_data <- read_excel("~/Downloads/S&P500_Data.xlsx")
+
+# Ensure date formatting and combine data into a time-series compatible format
+nvidia_data$Date <- as.Date(nvidia_data$Date)
+sp500_data$Date <- as.Date(sp500_data$Date)
+
+# Merge datasets on date (if needed)
+data_combined <- merge(nvidia_data, sp500_data, by = "Date")
+```
+
+## Plotting Time Series and Analyzing ACF/PACF
+
+Here, I plot the time series for NVIDIA and S&P 500 closing prices to visually inspect any apparent relationship between the two. I also calculate and plot the ACF and PACF to analyze potential autocorrelations in each series.
+
+```{r}
+# Plot time-series
+ggplot(data_combined, aes(x = Date)) +
+  geom_line(aes(y = NVIDIA_Close, color = "NVIDIA")) +
+  geom_line(aes(y = SP500_Close, color = "S&P 500")) +
+  labs(title = "Time Series of NVIDIA and S&P 500", y = "Closing Price") +
+  theme_minimal()
+
+# ACF and PACF
+par(mfrow = c(2, 2))
+acf(data_combined$NVIDIA_Close, main = "NVIDIA ACF")
+pacf(data_combined$NVIDIA_Close, main = "NVIDIA PACF")
+acf(data_combined$SP500_Close, main = "S&P 500 ACF")
+pacf(data_combined$SP500_Close, main = "S&P 500 PACF")
+```
+
+## STL Decomposition
+
+I perform STL decomposition on both time series to break down each into trend, seasonal, and remainder components. This helps identify underlying patterns in the data.
+
+```{r}
+# Convert to time series and perform STL decomposition
+nvidia_ts <- ts(data_combined$NVIDIA_Close, frequency = 12)
+sp500_ts <- ts(data_combined$SP500_Close, frequency = 12)
+
+nvidia_stl <- stl(nvidia_ts, s.window = "periodic")
+sp500_stl <- stl(sp500_ts, s.window = "periodic")
+
+plot(nvidia_stl, main = "NVIDIA STL Decomposition")
+plot(sp500_stl, main = "S&P 500 STL Decomposition")
+```
+
+## Fitting ARIMA Models
+
+Using auto.arima, I fit ARIMA models for NVIDIA and S&P 500 to capture trend, seasonality, and cycles, adjusting for differencing and periodic components.
+
+```{r}
+# Fit a model (e.g., ARIMA with trend and seasonality)
+nvidia_arima <- auto.arima(nvidia_ts, seasonal = TRUE)
+sp500_arima <- auto.arima(sp500_ts, seasonal = TRUE)
+
+summary(nvidia_arima)
+```
+
+Here we can see that the ARIMA of the NVIDA stock is displayed as ARIMA(5,2,0)(0,0,2). This ARIMA(5,2,0)(0,0,2)[12] model uses five autoregressive terms and two levels of differencing to capture non-seasonal patterns. The model includes two seasonal moving average terms with a yearly seasonality period (for monthly data), which helps in capturing any repeating annual pattern without additional differencing for the seasonal component.
+
+```{r}
+summary(sp500_arima)
+```
+
+The ARIMA(2,1,2)(0,0,2)[12] model uses two autoregressive and two moving average terms with one differencing step to handle non-seasonal patterns. The seasonal component has two moving average terms with a 12-month period, capturing yearly seasonality without extra seasonal differencing. This setup effectively models short-term dependencies and annual patterns in the data.
+
+## Residuals Analysis
+
+I plot the residuals of each ARIMA model to evaluate the model’s fit. Analyzing residual patterns helps assess if further adjustments are needed.
+
+```{r}
+# Residuals vs Fitted
+par(mfrow = c(1, 2))
+plot(nvidia_arima$residuals, main = "NVIDIA Residuals")
+plot(sp500_arima$residuals, main = "S&P 500 Residuals")
+```
+
+## 12-Step Forecast
+
+Using the fitted ARIMA models, I forecast 12 steps ahead and plot the forecasts with error bands to visualize projected values and uncertainties.
+
+```{r}
+nvidia_forecast <- forecast(nvidia_arima, h = 12)
+sp500_forecast <- forecast(sp500_arima, h = 12)
+
+# Plot forecasts with error bands
+plot(nvidia_forecast, main = "NVIDIA 12-Step Forecast")
+plot(sp500_forecast, main = "S&P 500 12-Step Forecast")
+```
+
+## Fitting a VAR Model
+
+I prepare the data for a VAR (Vector Autoregressive) model and fit it with lag order 2. This model allows us to analyze the relationship between NVIDIA and S&P 500 over time.
+
+```{r, fig.width = 8, fig.height = 8}
+# Prepare data for VAR
+combined_ts <- cbind(NVIDIA = nvidia_ts, SP500 = sp500_ts)
+var_model <- VAR(combined_ts, p = 2)
+
+summary(var_model)
+plot(var_model)
+```
+
+## Impulse Response Function (IRF)
+
+To understand the impact of shocks to NVIDIA on S&P 500 and vice versa, I compute and plot the impulse response functions (IRF) of the VAR model.
+
+```{r}
+irf_results <- irf(var_model)
+plot(irf_results)
+```
+
+## Granger Causality Test
+
+I perform a Granger causality test to determine if changes in NVIDIA's series can predict changes in the S&P 500 series.
+
+```{r}
+granger_test <- causality(var_model, cause = "NVIDIA")
+print(granger_test)
+```
+
+## CUSUM Test for Stability
+
+Finally, I conduct the CUSUM test on the residuals of each series in the VAR model to check for structural stability.
+
+```{r, fig.width=10, fig.height=6}
+# Load necessary package
+library(strucchange)
+
+# Extract residuals for NVIDIA and S&P 500 from the VAR model
+nvidia_resid <- residuals(var_model)[, "NVIDIA"]
+sp500_resid <- residuals(var_model)[, "SP500"]
+
+# Apply the CUSUM test on the residuals of each series
+nvidia_cusum <- efp(nvidia_resid ~ 1, type = "OLS-CUSUM")
+sp500_cusum <- efp(sp500_resid ~ 1, type = "OLS-CUSUM")
+
+# Plot the CUSUM results for both residuals
+par(mfrow = c(1, 2))
+plot(nvidia_cusum, main = "CUSUM Test for NVIDIA Residuals")
+plot(sp500_cusum, main = "CUSUM Test for S&P 500 Residuals")
+```
